@@ -12,7 +12,7 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.storage.local.set({ extensionEnabled: enableToggle.checked });
   });
 
-  // Dynamically display shortcuts
+  // Dynamically display shortcuts from user settings
   chrome.commands.getAll((commands) => {
     for (const command of commands) {
       const shortcutEl = document.getElementById(`${command.name}-sc`);
@@ -22,7 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Add event listeners for all command buttons
+  // Add event listeners for all Quick Nav command buttons
   const commandButtons = [
     "go-to-sites",
     "go-to-dam",
@@ -36,29 +36,28 @@ document.addEventListener("DOMContentLoaded", () => {
   ];
 
   commandButtons.forEach((id) => {
-    document.getElementById(id).addEventListener("click", () => {
-      if (enableToggle.checked) {
-        chrome.runtime.sendMessage({
-          command: "triggerCommand",
-          commandName: id,
-        });
-      }
-    });
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener("click", () => {
+        if (enableToggle.checked) {
+          chrome.runtime.sendMessage({
+            command: "triggerCommand",
+            commandName: id,
+          });
+        }
+      });
+    }
   });
 
-  // Login environment buttons
+  // Handle all data-url buttons (Login and Package Manager)
+  // This automatically picks up the new Package Manager buttons
   document.querySelectorAll("[data-url]").forEach((button) => {
     button.addEventListener("click", () => {
-      if (enableToggle.checked) {
-        chrome.runtime.sendMessage({
-          command: "openUrl",
-          url: button.dataset.url,
-        });
-      }
+      chrome.tabs.create({ url: button.dataset.url });
     });
   });
 
-  // "Edit All" shortcuts button
+  // "Edit Shortcuts" button
   document.getElementById("shortcuts-btn").addEventListener("click", () => {
     chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
   });

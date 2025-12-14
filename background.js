@@ -2,28 +2,16 @@
 
 const ENVIRONMENT_CONFIG = {
   qa: {
-    patterns: [
-      "author-astellas-qa-65.adobecqms.net",
-      "author1apnortheast1-b80.qa.astellas.adobecqms.net",
-      "18.180.111.160",
-    ],
-    hostnames: {
-      "qa-65": "https://author-astellas-qa-65.adobecqms.net",
-      b80: "https://author1apnortheast1-b80.qa.astellas.adobecqms.net",
-      ip: "https://18.180.111.160",
-    },
+    ip: "https://18.180.111.160",
+    patterns: ["18.180.111.160", "qa.", "qa-"],
+  },
+  stg: {
+    ip: "https://54.144.15.212",
+    patterns: ["54.144.15.212", "stg.", "stage"],
   },
   prod: {
-    patterns: [
-      "author-astellas-prod-65.adobecqms.net",
-      "author1useast1-b80.prod-65.astellas.adobecqms.net",
-      "54.243.158.24",
-    ],
-    hostnames: {
-      "prod-65": "https://author-astellas-prod-65.adobecqms.net",
-      b80: "https://author1useast1-b80.prod-65.astellas.adobecqms.net",
-      ip: "https://54.243.158.24",
-    },
+    ip: "https://54.243.158.24",
+    patterns: ["54.243.158.24", "www.", "preview."],
   },
 };
 
@@ -45,20 +33,30 @@ const PATH_CONFIG = {
 };
 
 // --- Helper Functions ---
+
+function getTargetEnvIP(url) {
+  const hostname = new URL(url).hostname;
+  if (hostname.includes("qa") || hostname.includes("18.180")) {
+    return ENVIRONMENT_CONFIG.qa.ip;
+  }
+  if (hostname.includes("stg") || hostname.includes("54.144")) {
+    return ENVIRONMENT_CONFIG.stg.ip;
+  }
+  return ENVIRONMENT_CONFIG.prod.ip;
+}
+
 function extractContentPath(url) {
   const path = url.pathname;
-  const search = url.search;
-  if (search.includes("wcmmode=disabled")) {
-    return path;
-  }
-  const patterns = [
-    /^\/(editor|sites|siteadmin|damadmin|assets|aem\/experience-fragments|aem\/forms)\.html(\/content\/.*)/,
-    /^\/(content\/.*)/,
-  ];
-  for (const pattern of patterns) {
-    const match = path.match(pattern);
-    if (match && match[2]) return match[2];
-    if (match && match[1]) return match[1];
+  if (path.includes("/content/")) {
+    const patterns = [
+      /^\/(editor|sites|siteadmin|damadmin|assets|aem\/experience-fragments|aem\/forms)\.html(\/content\/.*)/,
+      /^\/(content\/.*)/,
+    ];
+    for (const pattern of patterns) {
+      const match = path.match(pattern);
+      if (match && match[2]) return match[2];
+      if (match && match[1]) return match[1];
+    }
   }
   return null;
 }
@@ -67,62 +65,132 @@ function openInNextTab(url, currentTab) {
   chrome.tabs.create({ url: url, index: currentTab.index + 1 });
 }
 
+function fetchMetaPath() {
+  const meta = document.querySelector('meta[property="og:image"]');
+  if (meta && meta.content) {
+    try {
+        const urlObj = new URL(meta.content, window.location.origin);
+        let path = urlObj.pathname;
+        if(path.includes("/content/")) {
+            if (path.includes(".thumb")) {
+                path = path.split(".thumb")[0];
+            } else if (path.includes(".")) {
+                path = path.substring(0, path.lastIndexOf("."));
+            }
+            return path;
+        }
+    } catch (e) {
+        return null;
+    }
+  }
+  return null;
+}
+
 // --- Core Logic ---
-function navigate(target, tab) {
+
+async function navigate(target, tab) {
   const currentUrl = new URL(tab.url);
   const origin = currentUrl.origin;
-  let newUrl = "";
+  
+  let contentPath = extractContentPath(currentUrl);
+  
+  // One-Click Feature for Public Sites
+  if (!contentPath && target === "editor") {
+    try {
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: fetchMetaPath,
+        });
+        if (results && results[0] && results[0].result) {
+            contentPath = results[0].result;
+            const targetIP = getTargetEnvIP(tab.url);
+            const newUrl = `${targetIP}${PATH_CONFIG.touch.editor}${contentPath}.html`;
+            openInNextTab(newUrl, tab);
+            return;
+        }
+    } catch (err) {
+        console.error("Meta extraction failed:", err);
+    }
+  }
 
+  // Handle Forms
   if (target === "forms") {
     chrome.scripting.executeScript(
       {
         target: { tabId: tab.id },
-        func: () =>
-          document.querySelector(".guideContainerNode")?.dataset
-            .repositoryPath || null,
+        func: () => document.querySelector(".guideContainerNode")?.dataset.repositoryPath || null,
       },
       (results) => {
         const formPath = results[0].result;
-        newUrl = formPath
-          ? `${origin}${PATH_CONFIG.touch.editor}${formPath}`
-          : `${origin}${PATH_CONFIG.touch.forms}`;
+        const targetIP = origin.includes("http") ? origin : ENVIRONMENT_CONFIG.prod.ip;
+        const newUrl = formPath
+          ? `${targetIP}${PATH_CONFIG.touch.editor}${formPath}.html`
+          : `${targetIP}${PATH_CONFIG.touch.forms}`;
         openInNextTab(newUrl, tab);
       }
     );
     return;
   }
 
-  const contentPath = extractContentPath(currentUrl);
-  if (!contentPath && !["published", "props", "editor"].includes(target)) {
-    alert("Could not determine a valid AEM content path.");
+  if (!contentPath && !["published", "props"].includes(target)) {
+    alert("Could not determine AEM content path.");
     return;
   }
 
+  // Standard path cleaning
   const pathWithoutPage = contentPath
     ? contentPath.substring(0, contentPath.lastIndexOf("/"))
     : "";
+  
   const projectPath = pathWithoutPage.replace("/content/", "");
+  
+  const baseOrigin = (origin.includes("/content") || origin.includes("18.180") || origin.includes("54.")) 
+                     ? origin 
+                     : ENVIRONMENT_CONFIG.prod.ip;
+
+  let newUrl = "";
 
   switch (target) {
     case "sites":
-      newUrl = `${origin}${PATH_CONFIG.touch.sites}${pathWithoutPage}`;
+      newUrl = `${baseOrigin}${PATH_CONFIG.touch.sites}${pathWithoutPage}`;
       break;
     case "dam":
-      newUrl = `${origin}${PATH_CONFIG.touch.dam}/content/dam/${projectPath}`;
+      newUrl = `${baseOrigin}${PATH_CONFIG.touch.dam}/content/dam/${projectPath.split('/')[0]}`;
       break;
     case "xf":
-      newUrl = `${origin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${projectPath}/site`;
+      // FIX: Strict 5-level deep structure logic
+      // Pattern: /content/brand/type/region/affiliate/language/...
+      // Goal: /content/experience-fragments/brand/type/region/affiliate/language/site
+      
+      if (contentPath) {
+          const parts = contentPath.split("/");
+          // parts[0] is empty (leading slash)
+          // parts[1] is "content"
+          // We need parts 2, 3, 4, 5, 6 (Brand, Type, Region, Affiliate, Language)
+          
+          if (parts.length >= 7) {
+              const brand = parts[2];
+              const type = parts[3];
+              const region = parts[4];
+              const affiliate = parts[5];
+              const language = parts[6];
+
+              // Construct the exact path requested
+              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${brand}/${type}/${region}/${affiliate}/${language}/site`;
+          } else {
+              // Fallback if path is too short, just go to project root XF
+              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${parts[2] || ""}`;
+          }
+      }
       break;
     case "editor":
-      newUrl = `${origin}${PATH_CONFIG.touch.editor}${contentPath}`;
+      newUrl = `${baseOrigin}${PATH_CONFIG.touch.editor}${contentPath}.html`;
       break;
     case "props":
-      newUrl = `${origin}${PATH_CONFIG.touch.props}?item=${
-        contentPath.split(".html")[0]
-      }`;
+      newUrl = `${baseOrigin}${PATH_CONFIG.touch.props}?item=${contentPath}`;
       break;
     case "published":
-      newUrl = `${origin}${contentPath}?wcmmode=disabled`;
+      newUrl = `${baseOrigin}${contentPath}.html?wcmmode=disabled`;
       break;
   }
 
@@ -133,37 +201,32 @@ function toggleUi(tab) {
   const currentUrl = new URL(tab.url);
   const origin = currentUrl.origin;
   const path = currentUrl.pathname;
+  const hash = currentUrl.hash; // Capture the hash for Classic mode
   let newUrl = "";
 
-  const contentPath = path.includes("#")
-    ? path.split("#")[1]
-    : extractContentPath(currentUrl) || "/";
-  const contentPathNoHtml = contentPath.split(".html")[0];
-
-  if (path.includes("/siteadmin") || path.includes("/damadmin")) {
-    // From Classic
-    if (path.startsWith("/siteadmin"))
-      newUrl = `${origin}${PATH_CONFIG.touch.sites}${contentPathNoHtml}`;
-    else if (path.startsWith("/damadmin"))
-      newUrl = `${origin}${PATH_CONFIG.touch.dam}${contentPathNoHtml}`;
+  // FIX: Robust Classic to Touch switching
+  if (path.includes("siteadmin")) {
+    // Classic Sites -> Touch Sites
+    // Hash looks like: #/content/site/en
+    const cleanPath = hash.replace("#", "");
+    newUrl = `${origin}${PATH_CONFIG.touch.sites}${cleanPath}`;
+  } else if (path.includes("damadmin")) {
+    // Classic DAM -> Touch DAM
+    const cleanPath = hash.replace("#", "");
+    newUrl = `${origin}${PATH_CONFIG.touch.dam}${cleanPath}`;
   } else {
-    // From Touch
+    // Touch -> Classic (Existing logic works fine)
+    const contentPath = extractContentPath(currentUrl) || "/";
+    const contentPathClean = contentPath.replace(".html", "");
+
     if (path.startsWith("/sites.html"))
-      newUrl = `${origin}${
-        PATH_CONFIG.classic.sites
-      }${contentPathNoHtml.replace("/content", "")}`;
+      newUrl = `${origin}${PATH_CONFIG.classic.sites}${contentPathClean.replace("/content", "")}`;
     else if (path.startsWith("/assets.html"))
-      newUrl = `${origin}${PATH_CONFIG.classic.dam}${contentPathNoHtml.replace(
-        "/content/dam",
-        ""
-      )}`;
+      newUrl = `${origin}${PATH_CONFIG.classic.dam}${contentPathClean.replace("/content/dam", "")}`;
     else if (path.startsWith("/aem/experience-fragments.html"))
-      newUrl = `${origin}${PATH_CONFIG.classic.xf}${contentPathNoHtml.replace(
-        "/content/experience-fragments",
-        ""
-      )}`;
+      newUrl = `${origin}${PATH_CONFIG.classic.xf}${contentPathClean.replace("/content/experience-fragments", "")}`;
     else if (path.startsWith("/editor.html"))
-      newUrl = `${origin}${contentPath}?wcmmode=classic`;
+      newUrl = `${origin}${contentPathClean}.html?wcmmode=classic`;
     else
       alert("UI Toggle is only available in Sites, DAM, XF, or Editor view.");
   }
@@ -178,48 +241,41 @@ function switchEnvironment(tab) {
       currentUrl.hostname.includes(p)
     )
   );
+
   if (!currentEnv) {
     alert("AEM environment not detected.");
     return;
   }
 
-  const targetEnv = currentEnv === "qa" ? "prod" : "qa";
-  const currentInstanceKey = Object.keys(
-    ENVIRONMENT_CONFIG[currentEnv].hostnames
-  ).find(
-    (key) => currentUrl.origin === ENVIRONMENT_CONFIG[currentEnv].hostnames[key]
-  );
-
-  if (!currentInstanceKey) {
-    alert("AEM instance not detected.");
-    return;
-  }
-
-  const newHostname =
-    ENVIRONMENT_CONFIG[targetEnv].hostnames[currentInstanceKey];
-  const newUrl = currentUrl.href.replace(currentUrl.origin, newHostname);
+  let targetEnv = "qa";
+  if (currentEnv === "qa") targetEnv = "stg";
+  else if (currentEnv === "stg") targetEnv = "prod";
+  
+  const targetIP = ENVIRONMENT_CONFIG[targetEnv].ip;
+  const newUrl = currentUrl.href.replace(currentUrl.origin, targetIP);
   openInNextTab(newUrl, tab);
 }
 
 // --- Listeners ---
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.command === "openUrl" && request.url) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) =>
-      openInNextTab(request.url, tabs[0])
-    );
+  if (request.command === "triggerCommand") {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      executeCommand(request.commandName, tabs[0]);
+    });
   }
 });
 
 chrome.commands.onCommand.addListener((command, tab) => {
-  const isAEMEnv = [
-    ...ENVIRONMENT_CONFIG.qa.patterns,
-    ...ENVIRONMENT_CONFIG.prod.patterns,
-  ].some((p) => tab.url.includes(p));
-  if (!isAEMEnv) return;
+    chrome.storage.local.get(["extensionEnabled"], (result) => {
+      if (result.extensionEnabled !== false) {
+        executeCommand(command, tab);
+      }
+    });
+});
 
-  chrome.storage.local.get(["extensionEnabled"], (result) => {
-    if (result.extensionEnabled !== false) {
-      const commands = {
+function executeCommand(commandName, tab) {
+    const commands = {
         "go-to-xf": () => navigate("xf", tab),
         "go-to-dam": () => navigate("dam", tab),
         "go-to-sites": () => navigate("sites", tab),
@@ -230,7 +286,5 @@ chrome.commands.onCommand.addListener((command, tab) => {
         "toggle-ui": () => toggleUi(tab),
         "switch-environment": () => switchEnvironment(tab),
       };
-      if (commands[command]) commands[command]();
-    }
-  });
-});
+      if (commands[commandName]) commands[commandName]();
+}

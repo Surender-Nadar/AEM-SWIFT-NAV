@@ -12,8 +12,9 @@
       body {
         font-family: "Roboto", sans-serif;
         margin: 0;
-        padding: 15px;
-        width: 300px;
+        /* Reduced body padding */
+        padding: 10px;
+        width: 320px;
         background-color: #121212;
         background-image: radial-gradient(
             circle at 20% 20%,
@@ -30,37 +31,40 @@
       .container {
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        /* Reduced gap between sections */
+        gap: 8px;
       }
       .header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         border-bottom: 1px solid #333;
-        padding-bottom: 8px;
+        padding-bottom: 6px;
       }
       h2 {
-        font-size: 18px;
+        font-size: 16px; /* Slightly smaller header */
         margin: 0;
         font-weight: 500;
         color: #ffffff;
       }
       .section {
         background-color: rgba(255, 255, 255, 0.05);
-        padding: 12px;
+        /* Reduced section padding */
+        padding: 8px;
         border-radius: 8px;
         border: 1px solid #333;
       }
       .section-title {
         font-weight: 500;
-        margin-bottom: 10px;
-        font-size: 14px;
+        margin-bottom: 6px; /* Reduced margin */
+        font-size: 13px; /* Slightly smaller title */
         color: #bbbbbb;
       }
       .button-group {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 8px;
+        /* Reduced grid gap */
+        gap: 5px;
       }
       .button-group.three-col {
         grid-template-columns: 1fr 1fr 1fr;
@@ -68,31 +72,36 @@
       .button {
         background-color: #333;
         border: 1px solid #555;
-        border-radius: 5px;
+        border-radius: 4px;
         color: #e0e0e0;
-        padding: 8px 5px;
+        /* Significantly reduced button padding */
+        padding: 4px 2px;
         cursor: pointer;
-        font-size: 12px;
+        /* Smaller font size */
+        font-size: 11px;
         text-align: center;
         transition: background-color 0.2s, border-color 0.2s;
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
+        /* Reduced height */
+        min-height: 30px;
       }
       .button:hover {
         background-color: #444;
         border-color: #777;
       }
       .button .shortcut {
-        font-size: 10px;
+        /* Smaller shortcut font */
+        font-size: 9px;
         color: #999;
-        margin-top: 2px;
+        margin-top: 1px;
       }
       .creator {
-        font-size: 12px;
+        font-size: 11px;
         text-align: center;
-        margin-top: 10px;
+        margin-top: 8px;
         font-weight: 500;
         background: linear-gradient(
           90deg,
@@ -119,8 +128,8 @@
       .switch {
         position: relative;
         display: inline-block;
-        width: 34px;
-        height: 20px;
+        width: 30px; /* Smaller switch */
+        height: 18px;
       }
       .switch input {
         opacity: 0;
@@ -138,8 +147,8 @@
       .slider:before {
         position: absolute;
         content: "";
-        height: 12px;
-        width: 12px;
+        height: 10px; /* Smaller knob */
+        width: 10px;
         left: 4px;
         bottom: 4px;
         background-color: white;
@@ -150,7 +159,7 @@
         background-color: #81d4fa;
       }
       input:checked + .slider:before {
-        transform: translateX(14px);
+        transform: translateX(12px);
       }
     </style>
   </head>
@@ -164,6 +173,7 @@
           ></span
         ></label>
       </div>
+
       <div class="section">
         <div class="section-title">QA Login</div>
         <div class="button-group three-col">
@@ -187,6 +197,7 @@
           </button>
         </div>
       </div>
+
       <div class="section">
         <div class="section-title">Prod Login</div>
         <div class="button-group three-col">
@@ -210,6 +221,31 @@
           </button>
         </div>
       </div>
+
+      <div class="section">
+        <div class="section-title">Package Manager</div>
+        <div class="button-group three-col">
+          <button
+            class="button"
+            data-url="https://18.180.111.160/crx/packmgr/index.jsp"
+          >
+            QA Pkgs
+          </button>
+          <button
+            class="button"
+            data-url="https://54.144.15.212/crx/packmgr/index.jsp"
+          >
+            STG Pkgs
+          </button>
+          <button
+            class="button"
+            data-url="https://54.243.158.24/crx/packmgr/index.jsp"
+          >
+            PROD Pkgs
+          </button>
+        </div>
+      </div>
+
       <div class="section">
         <div class="section-title">Quick Navigation</div>
         <div class="button-group">
@@ -240,9 +276,10 @@
           <button class="button" id="switch-environment">
             Switch Env<span class="shortcut" id="switch-environment-sc"></span>
           </button>
-          <button class="button" id="shortcuts-btn">Edit All</button>
+          <button class="button" id="shortcuts-btn">Edit Shortcuts</button>
         </div>
       </div>
+
       <div class="creator">Created by: Surender Nadar</div>
     </div>
     <script src="popup.js"></script>
