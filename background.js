@@ -137,7 +137,6 @@ async function navigate(target, tab) {
     return;
   }
 
-  // Standard path cleaning
   const pathWithoutPage = contentPath
     ? contentPath.substring(0, contentPath.lastIndexOf("/"))
     : "";
@@ -178,7 +177,7 @@ async function navigate(target, tab) {
               // Construct the exact path requested
               newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${brand}/${type}/${region}/${affiliate}/${language}/site`;
           } else {
-              // Fallback if path is too short, just go to project root XF
+              // Fallback if path is too short
               newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${parts[2] || ""}`;
           }
       }
@@ -201,21 +200,18 @@ function toggleUi(tab) {
   const currentUrl = new URL(tab.url);
   const origin = currentUrl.origin;
   const path = currentUrl.pathname;
-  const hash = currentUrl.hash; // Capture the hash for Classic mode
+  const hash = currentUrl.hash;
   let newUrl = "";
 
   // FIX: Robust Classic to Touch switching
   if (path.includes("siteadmin")) {
-    // Classic Sites -> Touch Sites
-    // Hash looks like: #/content/site/en
     const cleanPath = hash.replace("#", "");
     newUrl = `${origin}${PATH_CONFIG.touch.sites}${cleanPath}`;
   } else if (path.includes("damadmin")) {
-    // Classic DAM -> Touch DAM
     const cleanPath = hash.replace("#", "");
     newUrl = `${origin}${PATH_CONFIG.touch.dam}${cleanPath}`;
   } else {
-    // Touch -> Classic (Existing logic works fine)
+    // Touch -> Classic
     const contentPath = extractContentPath(currentUrl) || "/";
     const contentPathClean = contentPath.replace(".html", "");
 
@@ -247,9 +243,15 @@ function switchEnvironment(tab) {
     return;
   }
 
-  let targetEnv = "qa";
-  if (currentEnv === "qa") targetEnv = "stg";
-  else if (currentEnv === "stg") targetEnv = "prod";
+  // BUG FIX: Switch strictly between QA and PROD (skipping STG in loop)
+  let targetEnv = "qa"; // Default fallback
+  
+  if (currentEnv === "qa") {
+    targetEnv = "prod";
+  } else if (currentEnv === "prod") {
+    targetEnv = "qa";
+  } 
+  // If on STG, it will default to 'qa' above, bringing you back into the main loop.
   
   const targetIP = ENVIRONMENT_CONFIG[targetEnv].ip;
   const newUrl = currentUrl.href.replace(currentUrl.origin, targetIP);
