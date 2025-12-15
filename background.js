@@ -49,13 +49,25 @@ function extractContentPath(url) {
   const path = url.pathname;
   if (path.includes("/content/")) {
     const patterns = [
+      // Case 1: Already inside editor/admin (captures /content/...)
       /^\/(editor|sites|siteadmin|damadmin|assets|aem\/experience-fragments|aem\/forms)\.html(\/content\/.*)/,
+      // Case 2: Published page (captures content/...)
       /^\/(content\/.*)/,
     ];
     for (const pattern of patterns) {
       const match = path.match(pattern);
-      if (match && match[2]) return match[2];
-      if (match && match[1]) return match[1];
+      if (match) {
+        let extracted = match[2] || match[1];
+        if (extracted) {
+             // 1. Strip extension (.html)
+             extracted = extracted.replace(/\.html$/, "");
+             // 2. Ensure path ALWAYS starts with /
+             if (!extracted.startsWith("/")) {
+                 extracted = "/" + extracted;
+             }
+             return extracted;
+        }
+      }
     }
   }
   return null;
@@ -77,6 +89,9 @@ function fetchMetaPath() {
             } else if (path.includes(".")) {
                 path = path.substring(0, path.lastIndexOf("."));
             }
+            if (!path.startsWith("/")) {
+                path = "/" + path;
+            }
             return path;
         }
     } catch (e) {
@@ -92,9 +107,11 @@ async function navigate(target, tab) {
   const currentUrl = new URL(tab.url);
   const origin = currentUrl.origin;
   
+  // FIX: Declare newUrl at the top scope to avoid redeclaration errors
+  let newUrl = "";
   let contentPath = extractContentPath(currentUrl);
   
-  // One-Click Feature for Public Sites
+  // 1. One-Click Feature for Public Sites
   if (!contentPath && target === "editor") {
     try {
         const results = await chrome.scripting.executeScript({
@@ -104,7 +121,7 @@ async function navigate(target, tab) {
         if (results && results[0] && results[0].result) {
             contentPath = results[0].result;
             const targetIP = getTargetEnvIP(tab.url);
-            const newUrl = `${targetIP}${PATH_CONFIG.touch.editor}${contentPath}.html`;
+            newUrl = `${targetIP}${PATH_CONFIG.touch.editor}${contentPath}.html`;
             openInNextTab(newUrl, tab);
             return;
         }
@@ -113,25 +130,31 @@ async function navigate(target, tab) {
     }
   }
 
-  // Handle Forms
+  // 2. Handle Forms (Converted to await to fix variable scope error)
   if (target === "forms") {
-    chrome.scripting.executeScript(
-      {
-        target: { tabId: tab.id },
-        func: () => document.querySelector(".guideContainerNode")?.dataset.repositoryPath || null,
-      },
-      (results) => {
-        const formPath = results[0].result;
+    try {
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => document.querySelector(".guideContainerNode")?.dataset.repositoryPath || null,
+        });
+        
+        const formPath = results[0]?.result; // Added safe access ?.
         const targetIP = origin.includes("http") ? origin : ENVIRONMENT_CONFIG.prod.ip;
-        const newUrl = formPath
+        
+        // No 'const' here, we update the main newUrl variable
+        newUrl = formPath
           ? `${targetIP}${PATH_CONFIG.touch.editor}${formPath}.html`
           : `${targetIP}${PATH_CONFIG.touch.forms}`;
+          
         openInNextTab(newUrl, tab);
-      }
-    );
-    return;
+        return;
+    } catch (err) {
+        console.error("Forms extraction failed:", err);
+        return;
+    }
   }
 
+  // 3. Standard AEM Path Logic
   if (!contentPath && !["published", "props"].includes(target)) {
     alert("Could not determine AEM content path.");
     return;
@@ -147,8 +170,6 @@ async function navigate(target, tab) {
                      ? origin 
                      : ENVIRONMENT_CONFIG.prod.ip;
 
-  let newUrl = "";
-
   switch (target) {
     case "sites":
       newUrl = `${baseOrigin}${PATH_CONFIG.touch.sites}${pathWithoutPage}`;
@@ -157,28 +178,24 @@ async function navigate(target, tab) {
       newUrl = `${baseOrigin}${PATH_CONFIG.touch.dam}/content/dam/${projectPath.split('/')[0]}`;
       break;
     case "xf":
-      // FIX: Strict 5-level deep structure logic
-      // Pattern: /content/brand/type/region/affiliate/language/...
-      // Goal: /content/experience-fragments/brand/type/region/affiliate/language/site
-      
       if (contentPath) {
-          const parts = contentPath.split("/");
-          // parts[0] is empty (leading slash)
-          // parts[1] is "content"
-          // We need parts 2, 3, 4, 5, 6 (Brand, Type, Region, Affiliate, Language)
+          const parts = contentPath.split("/"); 
+          // parts indices: 0="", 1="content", 2="brand"
+          let xfRootParts = [];
           
-          if (parts.length >= 7) {
+          if (parts[2] === "experience-fragments" && parts.length >= 8) {
+              xfRootParts = parts.slice(0, 8);
+              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}${xfRootParts.join("/")}/site`;
+          } else if (parts[2] !== "experience-fragments" && parts.length >= 7) {
               const brand = parts[2];
               const type = parts[3];
               const region = parts[4];
               const affiliate = parts[5];
-              const language = parts[6];
-
-              // Construct the exact path requested
-              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${brand}/${type}/${region}/${affiliate}/${language}/site`;
+              const lang = parts[6];
+              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${brand}/${type}/${region}/${affiliate}/${lang}/site`;
           } else {
-              // Fallback if path is too short
-              newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${parts[2] || ""}`;
+             const project = parts[2] === "experience-fragments" ? parts[3] : parts[2];
+             newUrl = `${baseOrigin}${PATH_CONFIG.touch.xf}/content/experience-fragments/${project}`;
           }
       }
       break;
@@ -203,7 +220,6 @@ function toggleUi(tab) {
   const hash = currentUrl.hash;
   let newUrl = "";
 
-  // FIX: Robust Classic to Touch switching
   if (path.includes("siteadmin")) {
     const cleanPath = hash.replace("#", "");
     newUrl = `${origin}${PATH_CONFIG.touch.sites}${cleanPath}`;
@@ -211,7 +227,6 @@ function toggleUi(tab) {
     const cleanPath = hash.replace("#", "");
     newUrl = `${origin}${PATH_CONFIG.touch.dam}${cleanPath}`;
   } else {
-    // Touch -> Classic
     const contentPath = extractContentPath(currentUrl) || "/";
     const contentPathClean = contentPath.replace(".html", "");
 
@@ -243,15 +258,12 @@ function switchEnvironment(tab) {
     return;
   }
 
-  // BUG FIX: Switch strictly between QA and PROD (skipping STG in loop)
-  let targetEnv = "qa"; // Default fallback
-  
+  let targetEnv = "qa"; 
   if (currentEnv === "qa") {
     targetEnv = "prod";
   } else if (currentEnv === "prod") {
     targetEnv = "qa";
   } 
-  // If on STG, it will default to 'qa' above, bringing you back into the main loop.
   
   const targetIP = ENVIRONMENT_CONFIG[targetEnv].ip;
   const newUrl = currentUrl.href.replace(currentUrl.origin, targetIP);
